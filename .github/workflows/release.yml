@@ -1,0 +1,48 @@
+# Bygger en binær pr. platform, når et tag som v1.2.3 pushes, og lægger dem
+# sammen med thehome.json på en GitHub-release. TheHome installerer derfra.
+# Go krydskompilerer statisk (CGO_ENABLED=0), så én runner bygger det hele.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # domænet fra thehome.json og pakken med main
+  DOMAIN: example_counter_go
+  MAIN: ./cmd/example_counter_go
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: Byg
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir dist
+          # GOOS/GOARCH og Rust-target-navnet, som TheHome leder efter
+          while read -r goos goarch target ext; do
+            GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" \
+              -o "dist/$DOMAIN-$target$ext" "$MAIN"
+          done <<'TARGETS'
+          windows amd64 x86_64-pc-windows-msvc .exe
+          linux amd64 x86_64-unknown-linux-musl
+          linux arm64 aarch64-unknown-linux-musl
+          darwin amd64 x86_64-apple-darwin
+          darwin arm64 aarch64-apple-darwin
+          TARGETS
+          ls -l dist
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: gh release create "$GITHUB_REF_NAME" dist/* thehome.json --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
