@@ -26,10 +26,14 @@ import (
 
 const domain = "example_counter_go"
 
+// logEvery er, hvor tit tællerens stand skrives i TheHomes log.
+const logEvery = 10 * time.Second
+
 // version sættes ved build med -ldflags "-X main.version=v1.2.3".
 var version = "dev"
 
 type counter struct {
+	name      string
 	count     uint64
 	running   bool
 	countID   string
@@ -239,7 +243,7 @@ func (x *example) SetupEntry(h *p.Host, entry p.Entry) error {
 	}
 
 	count := load(h, id)
-	c := &counter{count: count, running: true, countID: countID, runningID: runningID, resetID: resetID, stop: make(chan struct{})}
+	c := &counter{name: name, count: count, running: true, countID: countID, runningID: runningID, resetID: resetID, stop: make(chan struct{})}
 	x.mu.Lock()
 	x.counters[id] = c
 	x.mu.Unlock()
@@ -260,10 +264,22 @@ func (x *example) SetupEntry(h *p.Host, entry p.Entry) error {
 func (x *example) tick(h *p.Host, entryID string, c *counter, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
+	logT := time.NewTicker(logEvery)
+	defer logT.Stop()
 	for {
 		select {
 		case <-c.stop:
 			return
+		case <-logT.C:
+			x.mu.Lock()
+			name, n, running := c.name, c.count, c.running
+			x.mu.Unlock()
+			state := "kører"
+			if !running {
+				state = "pause"
+			}
+			p.Log("INFO", "%s: tælleren står på %d (%s)", name, n, state)
+			continue
 		case <-t.C:
 		}
 		x.mu.Lock()
